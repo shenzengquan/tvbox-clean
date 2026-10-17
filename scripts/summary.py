@@ -38,25 +38,21 @@ def main():
     except Exception as e:
         lines.append(f"未读到状态文件：{e}")
 
-    ver = fingerprint()
-    q = f"?v={ver}" if ver else ""
-    base = f"https://cdn.jsdelivr.net/gh/{repo}@main"
+    base = f"https://cdn.jsdelivr.net/gh/{repo}"
+    fastly = f"https://fastly.jsdelivr.net/gh/{repo}"
 
     lines += [
         "",
-        "**接口地址**（带 `?v=` 版本号，换版本后客户端不会读到旧缓存）",
-        "```",
-        f"{base}/tvbox.json{q}",
-        f"{base}/tvbox.min.json{q}",
-        "```",
-        "",
-        "<details><summary>不带版本号的固定地址</summary>",
-        "",
+        "**接口地址**（推荐，始终返回最新数据）",
         "```",
         f"{base}/tvbox.json",
         f"{base}/tvbox.min.json",
         "```",
-        "</details>",
+        "",
+        f"备用节点：`{fastly}/tvbox.json`",
+        "",
+        "> 地址里**不要加 `@main`**。jsDelivr 对显式分支引用做长缓存（最长 12 小时），",
+        "> purge 也刷不掉；省略版本号的写法缓存短，实测每次都是最新。",
     ]
 
     out = "\n".join(lines) + "\n"

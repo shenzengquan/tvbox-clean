@@ -317,16 +317,25 @@ def publish(cleaned):
 def gh_urls_for(repo="shenzengquan/tvbox-clean", branch="main", ver=None):
     """返回各访问地址。
 
-    ver 是缓存穿透参数（用数据指纹）。jsDelivr 对 @main 的缓存最长 12 小时，
-    purge 未必立刻生效（实测：仓库已更新，CDN 仍返回旧版）。
-    带上 ?v=<指纹> 后，URL 变了就是新资源，不受旧缓存影响。
+    ⚠️ 地址里刻意不写 @main：
+    jsDelivr 对「显式分支引用」（@main）做长缓存（最长 12 小时），
+    purge 也刷不掉 —— 实测仓库已是新版 396847 字节，@main 连续 6 次
+    10 分钟内都仍返回旧版 407695。
+    而「省略版本号」写法会解析到默认分支且缓存短：
+      200/396847  https://cdn.jsdelivr.net/gh/user/repo/tvbox.json      ← 最新
+      200/407695  https://cdn.jsdelivr.net/gh/user/repo@main/tvbox.json ← 旧
+    fastly.jsdelivr.net 节点同样返回最新，可作备用。
+
+    注意：不要加 ?v=<指纹> 之类的 query 参数试图穿透缓存 ——
+    jsDelivr 在分支引用下不把 query 计入缓存键，实测加与不加返回同一份旧内容。
     """
-    base = f"https://cdn.jsdelivr.net/gh/{repo}@{branch}"
-    q = f"?v={ver}" if ver else ""
+    base = f"https://cdn.jsdelivr.net/gh/{repo}"
+    fastly = f"https://fastly.jsdelivr.net/gh/{repo}"
     return {
-        "jsdelivr": base + "/tvbox.json" + q,
-        "jsdelivr_clean": base + "/tvbox.json",
-        "jsdelivr_min": base + "/tvbox.min.json" + q,
+        "jsdelivr": base + "/tvbox.json",
+        "jsdelivr_min": base + "/tvbox.min.json",
+        "fastly": fastly + "/tvbox.json",
+        "jsdelivr_branch": f"{base}@{branch}/tvbox.json",
         "raw": f"https://raw.githubusercontent.com/{repo}/{branch}/tvbox.json",
         "repo": f"https://github.com/{repo}",
     }
@@ -412,16 +421,14 @@ def push_via_git(cleaned):
         staged = run("git", "diff", "--cached", "--name-only", *existing)
         if not staged:
             log("GitHub: 数据未变化，跳过提交")
-            return gh_urls_for(ver=data_fingerprint(
-                os.path.join(SITE_DIR, "tvbox.json")))
+            return gh_urls_for()
         log(f"GitHub: 数据有变化 {staged.split()}，提交中…")
         now = datetime.now(CST).strftime("%Y-%m-%d %H:%M")
         run("git", "commit", "-m", f"auto update: {now} [skip ci]")
         run("git", "push", "origin", "HEAD:main")
         sha = run("git", "rev-parse", "--short=10", "HEAD")
         log(f"GitHub: OK - 已推送 commit {sha}")
-        return gh_urls_for(ver=data_fingerprint(
-            os.path.join(SITE_DIR, "tvbox.json")))
+        return gh_urls_for()
     except Exception as e:
         log(f"GitHub: 失败 - {e}")
         # 让 workflow 步骤变红，而不是静默吞掉
