@@ -246,6 +246,27 @@ SITE_URL_SIGNALS = (
     "loli", "sukebei", "missav", "javbus", "1024", "91pw", "8av", "9av",
     "/av/", "xyz/av", "1av.", "3av.", "5av.", "avshop", "avzy",
 )
+
+# 已知色情采集源主机名（精确匹配 hostname，不用子串）。
+# 子串规则覆盖不到的情况靠它兜底：
+#   - xxavs.com（湿园）：被 Cloudflare 挡死，探测永远失败，
+#     但域名里 "xxavs" 不含 "/av/" 或 "avzy" 这类信号
+#   - sexnguon.com（色南国）："sex" 能中，但同源换域名时就会漏
+# ⚠️ 全部来自 probe_result.json 里判定为 adult 的站点 api，逐个核对过。
+#    不要凭印象往里加 —— suoniapi.com（索尼）是正经站，曾被误加进来，
+#    一跑就把所有索尼源全删了。
+ADULT_HOSTS = (
+    "fhapi9.com", "slapibf.com", "api.11bat.com", "naixxzy.com",
+    "api.souavzyw.net", "api.souavzy.vip", "api.sexnguon.com",
+    "fqzy.me", "api.xjzyapi.com", "jipinvip.com", "vnzyz.com",
+    "jp98.vip", "lbapi9.com", "xxavs.com", "www.888dav.com",
+    "www.xrbsp.com", "www.pgxdy.com", "www.gdlsp.com", "www.msnii.com",
+    "mygzycj.com", "dadiapi.com", "kkzy.me", "91jpzyw.com", "91av.cyou",
+    "apilyzy.com", "caiji.naichaapi.com", "caiji.semaozy.net",
+    "apittzy.com", "api.yikanapi.com", "lbapiby.com", "mgzyz1.com",
+    "523zyw.me", "www.afasu.com",
+)
+
 # URL 编码后的中文路径单独处理：decode 之后再查中文词
 URL_DECODE_CN = ("日韩视频", "亚洲情色", "亚洲视频", "成人", "三级", "无码",
                  "伦理", "自拍", "偷拍", "萝莉", "巨乳", "制服", "丝袜",
@@ -293,29 +314,15 @@ def match_site_url(site):
     txt = _url_text(site)
     if not txt:
         return None, None
+    # 主机名精确黑名单优先（Cloudflare 挡死的源只能靠域名认）
+    for m in re.finditer(r"https?://([^/\s\"'\\<>|]+)", txt):
+        host = m.group(1).split("@")[-1].split(":")[0].lower()
+        if host in ADULT_HOSTS:
+            return host, f"色情源域名:{host}"
     for w in SITE_URL_SIGNALS:
         if w in txt:
             return w, f"抓取地址:{w}"
     # 编码后的中文路径：只在 URL 里查，且只认路径段的词
-    for w in URL_DECODE_CN:
-        if w in txt:
-            return w, f"抓取地址(编码):{w}"
-    return None, None
-
-
-def match_site_url(site):
-    """按站点实际抓取地址判定。返回 (命中, 说明) 或 (None, None)。
-
-    这是给 type=3（jar/py 蜘蛛）站点的第二道防线 ——
-    词库只能看名字，而这类站名叫「🧿流云┃影视」完全正常，
-    真身在 ext 的 主页url 里：https://www.1av.shop/。
-    """
-    txt = _url_text(site)
-    if not txt:
-        return None, None
-    for w in SITE_URL_SIGNALS:
-        if w in txt:
-            return w, f"抓取地址:{w}"
     for w in URL_DECODE_CN:
         if w in txt:
             return w, f"抓取地址(编码):{w}"
