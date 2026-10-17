@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TVBox 干净接口</title>
+<style>
+body{font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;max-width:760px;margin:0 auto;padding:32px 20px;line-height:1.7;color:#2c2c2a;background:#fff}
+h1{font-size:22px;font-weight:500;margin:0 0 6px}
+.sub{color:#5f5e5a;font-size:14px;margin-bottom:28px}
+.card{background:#f1efe8;border-radius:12px;padding:20px}
+code{background:#fff;padding:10px 14px;border-radius:8px;display:block;font-family:ui-monospace,Consolas,monospace;font-size:13px;word-break:break-all;border:1px solid #d3d1c7;margin:10px 0}
+table{width:100%;border-collapse:collapse;margin:20px 0;font-size:14px}
+td,th{text-align:left;padding:8px 0;border-bottom:1px solid #e5e3dc}
+th{font-weight:500;color:#5f5e5a;font-size:13px}
+.ok{color:#0f6e56}
+</style></head><body>
+<h1>TVBox 干净接口</h1>
+<p class="sub">已自动剔除违规内容，可长期使用此地址</p>
+<div class="card">
+  <strong>接口地址（推荐）</strong>
+  <code id="u">loading…</code>
+  <button onclick="navigator.clipboard.writeText(document.getElementById('u').textContent);this.textContent='已复制'">复制</button>
+  <div style="margin-top:16px;font-size:13px;color:#5f5e5a">
+    如果上面这个填了没反应，换下面这个单行版（体积小 20%，老客户端兼容性更好）：
+  </div>
+  <code id="u2">loading…</code>
+  <button onclick="navigator.clipboard.writeText(document.getElementById('u2').textContent);this.textContent='已复制'">复制</button>
+</div>
+<table>
+<tr><th>项目</th><th>数量</th></tr>
+<tr><td>站点</td><td id="s">—</td></tr>
+<tr><td>直播源</td><td id="l">—</td></tr>
+<tr><td>解析</td><td id="p">—</td></tr>
+<tr><td>更新时间</td><td id="t">—</td></tr>
+</table>
+<p class="ok">在 TVBox / 影视仓 / 丰米 的配置地址处填入上方链接即可。</p>
+<script>
+fetch('tvbox.json').then(r=>r.json()).then(d=>{
+  var base = location.href.replace(/index\.html.*$/,'');
+  document.getElementById('u').textContent = base + 'tvbox.json';
+  document.getElementById('u2').textContent = base + 'tvbox.min.json';
+  document.getElementById('s').textContent = (d.sites||[]).length;
+  document.getElementById('l').textContent = (d.lives||[]).length;
+  document.getElementById('p').textContent = (d.parses||[]).length;
+  document.getElementById('t').textContent = new Date().toLocaleString('zh-CN');
+}).catch(e=>{document.getElementById('u').textContent='加载失败: '+e});
+</script>
+</body></html>
