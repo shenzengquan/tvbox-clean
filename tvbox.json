@@ -13947,6 +13947,12 @@
    "type": 3,
    "api": "csp_Nostr",
    "homePage": "https://cyber.920410.xyz"
+  },
+  {
+   "key": "__test__",
+   "name": "__FAKE_TEST_SITE__",
+   "type": 3,
+   "api": "csp_Demo"
   }
  ],
  "lives": [
