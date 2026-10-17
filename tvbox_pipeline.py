@@ -314,6 +314,17 @@ def publish(cleaned):
                   f"tvbox.min.json ({len(min_payload)}B)"), SITE_URL + "/tvbox.json"
 
 
+def gh_urls_for(repo="shenzengquan/tvbox-clean", branch="main"):
+    """返回各访问地址。本地/Actions 共用，避免字典键不一致导致 KeyError。"""
+    base = f"https://cdn.jsdelivr.net/gh/{repo}@{branch}"
+    return {
+        "jsdelivr": base + "/tvbox.json",
+        "jsdelivr_min": base + "/tvbox.min.json",
+        "raw": f"https://raw.githubusercontent.com/{repo}/{branch}/tvbox.json",
+        "repo": f"https://github.com/{repo}",
+    }
+
+
 def push_github(cleaned):
     """推送清洗结果。
 
@@ -381,20 +392,14 @@ def push_via_git(cleaned):
         staged = run("git", "diff", "--cached", "--name-only", *targets)
         if not staged:
             log("GitHub: 内容未变化，跳过提交")
-            return {"repo": "https://github.com/shenzengquan/tvbox-clean"}
+            return gh_urls_for()
         log(f"GitHub: 待提交 {staged.split()}")
         now = datetime.now(CST).strftime("%Y-%m-%d %H:%M")
         run("git", "commit", "-m", f"auto update: {now} [skip ci]")
         run("git", "push", "origin", "HEAD:main")
         sha = run("git", "rev-parse", "--short=10", "HEAD")
         log(f"GitHub: OK - 已推送 commit {sha}")
-        return {
-            "jsdelivr": JSDELIVR_BASE + "/tvbox.json",
-            "jsdelivr_min": JSDELIVR_BASE + "/tvbox.min.json",
-            "raw": ("https://raw.githubusercontent.com/shenzengquan/"
-                    "tvbox-clean/main/tvbox.json"),
-            "repo": "https://github.com/shenzengquan/tvbox-clean",
-        }
+        return gh_urls_for()
     except Exception as e:
         log(f"GitHub: 失败 - {e}")
         # 让 workflow 步骤变红，而不是静默吞掉
