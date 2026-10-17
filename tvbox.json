@@ -15069,38 +15069,6 @@
    }
   },
   {
-   "name": "萝莉",
-   "type": 1,
-   "url": "http://chaloli.cn/home/api?type=ys&uid=1&key=ekloswzABCGHKLOT58&url=",
-   "ext": {
-    "flag": [
-     "rx",
-     "ltnb",
-     "renrenmi",
-     "rongxing",
-     "bilibili",
-     "哔哩哔哩",
-     "哔哩",
-     "youku",
-     "优酷",
-     "qiyi",
-     "爱奇艺",
-     "奇艺",
-     "qq",
-     "腾讯",
-     "mgtv",
-     "芒果",
-     "sohu",
-     "搜狐",
-     "letv",
-     "乐视",
-     "xigua",
-     "CL4K",
-     "西瓜"
-    ]
-   }
-  },
-  {
    "name": "直解",
    "type": 1,
    "url": "http://rxjx.kuanjv.com/allm3u8.php?url=",
