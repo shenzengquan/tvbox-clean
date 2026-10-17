@@ -359,13 +359,15 @@ def push_via_git(cleaned):
         return r.stdout.strip()
 
     try:
-        # workflow 里已经把 site/ 和状态文件写到工作目录（仓库根）
         run("git", "config", "user.name", "github-actions[bot]")
         run("git", "config", "user.email",
             "41898282+github-actions[bot]@users.noreply.github.com")
-        run("git", "add", "-A",
-            "tvbox.json", "tvbox.min.json", "index.html",
-            ".pipeline_state.json", "report.txt")
+        # 只 add 确定存在的文件：report.txt 等本地辅助文件不在仓库里，
+        # 直接写进 pathspec 会让 git 报 "did not match any files" 而整体失败
+        targets = [f for f in ("tvbox.json", "tvbox.min.json", "index.html",
+                               ".pipeline_state.json")
+                   if os.path.exists(os.path.join(HERE, f))]
+        run("git", "add", "-A", *targets)
         if not run("git", "status", "--porcelain"):
             log("GitHub: 内容未变化，跳过提交")
             return {"repo": "https://github.com/shenzengquan/tvbox-clean"}
@@ -383,7 +385,8 @@ def push_via_git(cleaned):
         }
     except Exception as e:
         log(f"GitHub: 失败 - {e}")
-        return None
+        # 让 workflow 步骤变红，而不是静默吞掉
+        raise
 
 
 def purge_jsdelivr():
@@ -471,7 +474,9 @@ def main():
     gh_urls = None
     if not args.no_github:
         gh_urls = push_github(cleaned)
-        if gh_urls:
+        # 刷新 CDN 放在最后：只有真的推了新内容才需要，
+        # 且要在 commit 之后调，否则刷到的是旧版本
+        if gh_urls and not IN_ACTIONS:
             purge_jsdelivr()
 
     # --- 5. 记状态 ---
