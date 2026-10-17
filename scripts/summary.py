@@ -2,11 +2,21 @@
 # -*- coding: utf-8 -*-
 """生成 Actions 运行摘要（显示在 workflow 运行页顶部）。"""
 
+import hashlib
 import json
 import os
 import sys
 
 STATE = ".pipeline_state.json"
+
+
+def fingerprint(path="tvbox.json"):
+    """数据指纹，拼到 ?v= 后面绕过 jsDelivr 缓存。"""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:10]
+    except Exception:
+        return None
 
 
 def main():
@@ -28,13 +38,25 @@ def main():
     except Exception as e:
         lines.append(f"未读到状态文件：{e}")
 
+    ver = fingerprint()
+    q = f"?v={ver}" if ver else ""
+    base = f"https://cdn.jsdelivr.net/gh/{repo}@main"
+
     lines += [
         "",
-        "**接口地址**",
+        "**接口地址**（带 `?v=` 版本号，换版本后客户端不会读到旧缓存）",
         "```",
-        f"https://cdn.jsdelivr.net/gh/{repo}@main/tvbox.json",
-        f"https://cdn.jsdelivr.net/gh/{repo}@main/tvbox.min.json",
+        f"{base}/tvbox.json{q}",
+        f"{base}/tvbox.min.json{q}",
         "```",
+        "",
+        "<details><summary>不带版本号的固定地址</summary>",
+        "",
+        "```",
+        f"{base}/tvbox.json",
+        f"{base}/tvbox.min.json",
+        "```",
+        "</details>",
     ]
 
     out = "\n".join(lines) + "\n"

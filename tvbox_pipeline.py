@@ -314,15 +314,32 @@ def publish(cleaned):
                   f"tvbox.min.json ({len(min_payload)}B)"), SITE_URL + "/tvbox.json"
 
 
-def gh_urls_for(repo="shenzengquan/tvbox-clean", branch="main"):
-    """返回各访问地址。本地/Actions 共用，避免字典键不一致导致 KeyError。"""
+def gh_urls_for(repo="shenzengquan/tvbox-clean", branch="main", ver=None):
+    """返回各访问地址。
+
+    ver 是缓存穿透参数（用数据指纹）。jsDelivr 对 @main 的缓存最长 12 小时，
+    purge 未必立刻生效（实测：仓库已更新，CDN 仍返回旧版）。
+    带上 ?v=<指纹> 后，URL 变了就是新资源，不受旧缓存影响。
+    """
     base = f"https://cdn.jsdelivr.net/gh/{repo}@{branch}"
+    q = f"?v={ver}" if ver else ""
     return {
-        "jsdelivr": base + "/tvbox.json",
-        "jsdelivr_min": base + "/tvbox.min.json",
+        "jsdelivr": base + "/tvbox.json" + q,
+        "jsdelivr_clean": base + "/tvbox.json",
+        "jsdelivr_min": base + "/tvbox.min.json" + q,
         "raw": f"https://raw.githubusercontent.com/{repo}/{branch}/tvbox.json",
         "repo": f"https://github.com/{repo}",
     }
+
+
+def data_fingerprint(path):
+    """tvbox.json 内容的短指纹，用于拼 ?v= 绕过 CDN 缓存。"""
+    import hashlib
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:10]
+    except Exception:
+        return None
 
 
 def push_github(cleaned):
@@ -395,14 +412,16 @@ def push_via_git(cleaned):
         staged = run("git", "diff", "--cached", "--name-only", *existing)
         if not staged:
             log("GitHub: 数据未变化，跳过提交")
-            return gh_urls_for()
+            return gh_urls_for(ver=data_fingerprint(
+                os.path.join(SITE_DIR, "tvbox.json")))
         log(f"GitHub: 数据有变化 {staged.split()}，提交中…")
         now = datetime.now(CST).strftime("%Y-%m-%d %H:%M")
         run("git", "commit", "-m", f"auto update: {now} [skip ci]")
         run("git", "push", "origin", "HEAD:main")
         sha = run("git", "rev-parse", "--short=10", "HEAD")
         log(f"GitHub: OK - 已推送 commit {sha}")
-        return gh_urls_for()
+        return gh_urls_for(ver=data_fingerprint(
+            os.path.join(SITE_DIR, "tvbox.json")))
     except Exception as e:
         log(f"GitHub: 失败 - {e}")
         # 让 workflow 步骤变红，而不是静默吞掉
