@@ -141,8 +141,19 @@ def fetch_best():
         ex.shutdown(wait=False, cancel_futures=True)
 
 
-def do_clean(data, blacklist_path):
-    """清洗，返回 (cleaned_dict, stats)。复用 tvbox_clean 的规则。"""
+def do_clean(data, blacklist_path, probe=None):
+    """清洗，返回 (cleaned_dict, stats)。复用 tvbox_clean 的规则。
+
+    probe 是分类探测结果（probe_result.json 的内容）。它为 None 时只做词库
+    清洗（老行为），这样离线/自测场景仍可跑。
+
+    为什么需要 probe
+    ----------------
+    词库只能看名字。「🧿凤凰┃影视」「🍊森林」「🍊蝙蝠」「🧿正品┃影视」
+    这些站名字全都干净，但它 ac=list 返回的分类是
+    伦理三级 / 制服丝袜 / 少女萝莉 / 群交淫乱 —— 纯色情站。
+    只能问接口本身。详见 probe_sites.py 与 cat_policy.py。
+    """
     name_only, strong, weak = tc.load_blacklist(blacklist_path)
 
     sites = data.get("sites", [])
@@ -159,6 +170,19 @@ def do_clean(data, blacklist_path):
             dropped.append((s, why, lvl))
         else:
             kept.append(s)
+
+    # ---- 分类级净化（两种粒度）----
+    # 在词库清洗之后做：先把名字明显违规的删掉，再对剩下的查内容。
+    # 这样能省掉大量无意义的网络探测。
+    cat_dropped_sites, cat_dropped = [], []
+    if probe:
+        tmp = {"sites": kept}
+        ds, dc = tc.apply_probe_policy(tmp, probe, log=None)
+        kept = tmp["sites"]
+        cat_dropped_sites = ds
+        cat_dropped = dc
+        for x, why in ds:
+            dropped.append((x, f"整接口违规:{why}", "probe-site"))
 
     kept_lives, dropped_lives = [], []
     for l in lives:
@@ -200,6 +224,8 @@ def do_clean(data, blacklist_path):
         "parses_in": len(data.get("parses", [])), "parses_out": len(kept_parses),
         "dropped_sites": len(dropped), "dropped_lives": len(dropped_lives),
         "dropped_parses": len(dropped_parses),
+        "cat_cleaned": len(cat_dropped),
+        "cat_removed_names": sum(len(c) for _, c, _ in cat_dropped),
         "dropped_detail": [
             {"name": str(x.get("name"))[:60], "reason": why, "level": lvl}
             for x, why, lvl in dropped
@@ -209,6 +235,12 @@ def do_clean(data, blacklist_path):
         ] + [
             {"name": str(x.get("name"))[:60], "reason": why, "level": "parse-" + lvl}
             for x, why, lvl in dropped_parses
+        ],
+        "cat_cleaned_detail": [
+            {"name": str(x.get("name"))[:60],
+             "removed": list(cats),
+             "left": len(left)}
+            for x, cats, left in cat_dropped
         ],
     }
     return cleaned, stats
@@ -245,8 +277,24 @@ def verify(cleaned, stats, prev_state):
         if any(s in u for s in ("loli", "lolita", "chaloli")):
             hits.append(f"解析URL:{str(p.get('url'))[:40]}")
 
+    # 分类名残留：探测判定该删的分类，必须真的从该站点的 categories 里消失。
+    # 只查被清洗站点自己的 categories —— 不能全文扫描，因为同一个词
+    # （如「日本伦理」）可能仍出现在别的正常站点的筛查项里。
+    if stats.get("cat_cleaned_detail"):
+        by_name = {}
+        for s in cleaned.get("sites", []):
+            by_name[str(s.get("name"))[:60]] = s
+        for d in stats["cat_cleaned_detail"]:
+            s = by_name.get(d.get("name", "")[:60])
+            if s is None:
+                continue
+            cs = s.get("categories") or []
+            left = [c for c in (d.get("removed") or []) if c in cs]
+            if left:
+                hits.append(f"分类残留:{left}(在{d.get('name','')[:16]})")
+
     if hits:
-        problems.append(f"残留敏感词: {hits}")
+        problems.append(f"残留敏感词: {hits[:12]}")
 
     # 2. 数量合理性（防止上游给出残缺数据时误发布）
     prev_sites = (prev_state or {}).get("sites_out")
@@ -452,11 +500,75 @@ def purge_jsdelivr():
     return ok
 
 
+def run_probe(data):
+    """对配置里的采集源做分类探测。返回 probe 结果列表。
+
+    只探测 type=0/1/4 且 api 是 http 的站点（这些是标准苹果CMS采集接口）。
+    type=3 是 jar/py 蜘蛛（csp_XXX），没有可探测的 HTTP 协议，只能靠词库。
+
+    探测是网络密集操作（几百个站点，每个 1~3 次请求），所以：
+    - 并发 40
+    - 单个超时 12 秒
+    - 整体失败不影响主流程（调用方降级为纯词库清洗）
+    """
+    import probe_sites as pb
+
+    targets = [s for s in data.get("sites", [])
+               if str(s.get("api", "")).startswith("http")
+               and s.get("type") in (0, 1, 4)]
+    if not targets:
+        return []
+    log(f"分类探测: {len(targets)} 个采集源并发探测中…")
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results = []
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=40) as ex:
+        futs = [ex.submit(pb.probe_one, s) for s in targets]
+        for f in as_completed(futs):
+            try:
+                results.append(f.result())
+            except Exception:
+                pass
+
+    # 同域传播：判为整站色情的采集器，其镜像入口一并标色情
+    import cat_policy
+    bad_fps = {cat_policy.api_fingerprint(r["api"])
+               for r in results if r.get("verdict") == "adult"}
+    bad_fps.discard(None)
+    promoted = 0
+    for r in results:
+        if r.get("verdict") == "adult":
+            continue
+        fp = cat_policy.api_fingerprint(r.get("api"))
+        if fp and fp in bad_fps:
+            r["verdict"] = "adult"
+            r["reason"] = (r.get("reason") or "") + f" [同域传播 {fp.split('/')[0]}]"
+            promoted += 1
+
+    n_adult = sum(1 for r in results if r.get("verdict") == "adult")
+    n_part = sum(1 for r in results if r.get("verdict") == "partial")
+    n_ok = sum(1 for r in results if r.get("ok"))
+    log(f"分类探测完成: 成功 {n_ok}/{len(targets)}, "
+        f"整站违规 {n_adult}, 部分分类违规 {n_part}, "
+        f"同域补判 {promoted}, 耗时 {time.time() - t0:.1f}s")
+
+    # 明细落盘，便于事后核查
+    try:
+        with open(os.path.join(HERE, "probe_result.json"), "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="只清洗不发布")
     ap.add_argument("--no-publish", action="store_true", help="同 --dry-run")
     ap.add_argument("--no-github", action="store_true", help="只写本地，不推 GitHub")
+    ap.add_argument("--no-probe", action="store_true",
+                    help="跳过分类探测，只做词库清洗（快，但会漏伪装站）")
     ap.add_argument("--local", help="用本地文件替代拉取")
     ap.add_argument("--blacklist", default=os.path.join(HERE, "blacklist.txt"))
     args = ap.parse_args()
@@ -479,14 +591,25 @@ def main():
     log(f"原始: sites={len(data.get('sites', []))} "
         f"lives={len(data.get('lives', []))} parses={len(data.get('parses', []))}")
 
-    # --- 2. 清洗 ---
-    cleaned, stats = do_clean(data, args.blacklist)
+    # --- 2. 分类探测（词库看不见的伪装色情站，只能问接口本身）---
+    probe = None
+    if not args.no_probe:
+        try:
+            probe = run_probe(data)
+        except Exception as e:
+            log(f"探测失败，降级为纯词库清洗: {type(e).__name__}: {e}")
+
+    # --- 3. 清洗 ---
+    cleaned, stats = do_clean(data, args.blacklist, probe=probe)
     log(f"清洗: 站点 {stats['sites_in']} -> {stats['sites_out']} "
         f"(删 {stats['dropped_sites']}) | "
         f"直播 {stats['lives_in']} -> {stats['lives_out']} "
         f"(删 {stats['dropped_lives']})")
+    if stats.get("cat_cleaned"):
+        log(f"分类级净化: {stats['cat_cleaned']} 个站点，"
+            f"共剔除 {stats['cat_removed_names']} 个违规分类（站点保留）")
 
-    # --- 3. 校验 ---
+    # --- 4. 校验 ---
     ok, problems = verify(cleaned, stats, state)
     if not ok:
         log("校验失败，中止发布：")
@@ -500,8 +623,11 @@ def main():
 
     # 落一份本地副本
     local_out = os.path.join(HERE, "tvbox_clean.json")
-    with open(local_out, "w", encoding="utf-8") as f:
-        json.dump(cleaned, f, ensure_ascii=False, indent=1)
+    # 同样字节写入：文本模式会把 \n 转成 \r\n，本地副本也会带上 CRLF，
+    # 拿它做对比/校验时会得出错误结论。
+    with open(local_out, "wb") as f:
+        f.write(json.dumps(cleaned, ensure_ascii=False,
+                           indent=1).replace("\r\n", "\n").encode("utf-8"))
     log(f"本地副本: {local_out} ({os.path.getsize(local_out)} 字节)")
 
     if args.dry_run or args.no_publish:

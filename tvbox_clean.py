@@ -170,13 +170,18 @@ def _hit(words, low, base64_like=False):
 def match_site(site, name_only, strong, weak):
     """返回 (命中说明, 命中等级, 命中字段组)。
 
-    匹配顺序: 站名专有词 -> 可靠字段(name/分类) -> ext/key。
+    匹配顺序: 站名专有词 -> 抓取地址 -> 可靠字段(name/分类) -> ext/key。
     命中等级: strong=判定违规, weak=待复核
     """
     nm = _join(site.get("name")).lower()
     h = _hit(name_only, nm)
     if h:
         return h, "strong", f"站名:{h}"
+
+    # 抓取地址（ext.主页url / api）—— type=3 蜘蛛站只靠这个能查出来
+    h, why = match_site_url(site)
+    if h:
+        return h, "strong", why
 
     # ext 里常见超长 base64，ASCII 长串内容不做匹配
     for fields, tag in ((STRONG_FIELDS, "名称/分类"), (WEAK_FIELDS, "ext/key")):
@@ -229,6 +234,93 @@ def match_live(live, name_only, strong, weak):
 # 动漫分类筛选（「情感&科幻&冒险&萝莉&校园」这类 ext 标签串）。
 PARSE_URL_SIGNALS = ("loli", "lolita", "porn", "jav", "hentai", "avbo", "18av")
 
+# 站点抓取地址专用信号（作用于 ext 里的 主页url / 站点，以及 api 本身）。
+# 这些是域名/路径级证据，词库里放会误伤正常站，所以单独成表。
+#   实测样本：
+#     jav.sb                          → 春堂资源
+#     777mmx.com/yazhouxingai         → 快活影视（亚洲性爱）
+#     1av.shop                        → 流云影视
+#     777170.xyz/%e6%97%a5%e9%9f%a9..  → 搜视影视（URL 编码的「日韩视频」）
+SITE_URL_SIGNALS = (
+    "jav", "porn", "hentai", "av18", "18av", "sex", "xingai", "yazhou",
+    "loli", "sukebei", "missav", "javbus", "1024", "91pw", "8av", "9av",
+    "/av/", "xyz/av", "1av.", "3av.", "5av.", "avshop", "avzy",
+)
+# URL 编码后的中文路径单独处理：decode 之后再查中文词
+URL_DECODE_CN = ("日韩视频", "亚洲情色", "亚洲视频", "成人", "三级", "无码",
+                 "伦理", "自拍", "偷拍", "萝莉", "巨乳", "制服", "丝袜",
+                 "乱伦", "人妻", "熟女", "群交", "强奸", "调教")
+
+
+def _url_text(site):
+    """提取站点里"真正会被访问的 URL"，不是 ext 的全部文本。
+
+    关键区分（踩过的坑）：
+    - ext 里的 URL 是**抓取目标**，出现 jav.sb / yazhouxingai 就是硬证据
+    - ext 里的「剧情」筛选项是**标签串**，形如
+      情感&科幻&冒险&萝莉&校园 —— 6080电影、纽约影院、囧次元动漫
+      这些正经站的这一串里都有「萝莉」，拿它判违规会误杀一片
+
+    所以这里只抓 URL 形态的子串（含 host 的 http(s) 地址 + 路径），
+    并把 URL 编码解一次，让 /%e6%97%a5%e9%9f%a9/ 这类路径现形。
+    """
+    parts = []
+    api = _join(site.get("api"))
+    ext = site.get("ext")
+    for blob in (api, _join(ext)):
+        # 只取 http(s)://... 直到空白或引号，这才是真实访问地址
+        for m in re.finditer(r"https?://[^\s\"'\\<>|]+", str(blob)):
+            parts.append(m.group(0))
+    if not parts:
+        return ""
+    txt = " ".join(parts).lower()
+    try:
+        txt += " " + up.unquote(txt)
+    except Exception:
+        pass
+    return txt
+
+
+def match_site_url(site):
+    """按站点实际抓取的 URL 判定。返回 (命中, 说明) 或 (None, None)。
+
+    这是给 type=3（jar/py 蜘蛛）站点的第二道防线 ——
+    词库只能看名字，而这类站名叫「🧿流云┃影视」完全正常，
+    真身在 ext 的主页url 里：https://www.1av.shop/。
+
+    只看 URL 路径/域名，不看 ext 里的筛选项标签串（见 _url_text 说明）。
+    """
+    txt = _url_text(site)
+    if not txt:
+        return None, None
+    for w in SITE_URL_SIGNALS:
+        if w in txt:
+            return w, f"抓取地址:{w}"
+    # 编码后的中文路径：只在 URL 里查，且只认路径段的词
+    for w in URL_DECODE_CN:
+        if w in txt:
+            return w, f"抓取地址(编码):{w}"
+    return None, None
+
+
+def match_site_url(site):
+    """按站点实际抓取地址判定。返回 (命中, 说明) 或 (None, None)。
+
+    这是给 type=3（jar/py 蜘蛛）站点的第二道防线 ——
+    词库只能看名字，而这类站名叫「🧿流云┃影视」完全正常，
+    真身在 ext 的 主页url 里：https://www.1av.shop/。
+    """
+    txt = _url_text(site)
+    if not txt:
+        return None, None
+    for w in SITE_URL_SIGNALS:
+        if w in txt:
+            return w, f"抓取地址:{w}"
+    for w in URL_DECODE_CN:
+        if w in txt:
+            return w, f"抓取地址(编码):{w}"
+    return None, None
+
 
 def match_parse(p, name_only, strong, weak):
     """解析器（parses）检测。
@@ -272,6 +364,121 @@ def clean_site_name(site):
     if n2:
         s["name"] = n2
     return s
+
+
+# ---------------------------------------------------------------- 分类级净化
+def apply_probe_policy(data, probe, log=print):
+    """按探测结果做两种粒度的净化。
+
+    规则（用户明确要求）：
+      1. 接口整体违禁  → 整个接口（sites 条目）删除
+      2. 只有部分分类违禁 → 只删对应分类，站点保留
+
+    两条独立的力量叠加：
+      (a) 探测结果：分类里有片的色情分类 → 删
+      (b) 配置硬编码：categories 里写着色情分类名 → 无论如何都删
+          （探测失败/空壳/站点换了域名时，(a) 会漏，靠 (b) 兜底）
+    """
+    import cat_policy
+    sites = data.get("sites") or []
+
+    # ---- 索引：按 (key, api) 和 按 (host, path) 双路查找
+    # 同一批色情源会换 key、换名字挂很多入口（OK资源/OK/🍏OK 指向同一 api），
+    # 探测时有的入口超时、有的成功。若只按 (key, api) 精确匹配，
+    # 超时那个入口就会被放行 —— 实测因此漏了 6 个（OK资源、无尽CC、
+    # 鸭鸭资源、索尼-闪电 的色情分类仍在）。
+    # 所以再按 api 指纹兜一次：同一台采集器，判定互相通用。
+    idx = {}
+    for p in probe or []:
+        if p.get("ok") and p.get("verdict") in ("adult", "partial"):
+            idx[(p.get("key"), str(p.get("api", "")).strip())] = p
+
+    fp_idx = {}
+    for p in idx.values():
+        fp = cat_policy.api_fingerprint(p.get("api"))
+        if not fp:
+            continue
+        cur = fp_idx.get(fp)
+        # 同一指纹多条结果时，"整站违规"优先级最高
+        if cur is None or p["verdict"] == "adult":
+            fp_idx[fp] = p
+        else:
+            # 合并需要删的分类：镜像之间删的不一样时取并集
+            a = set(cur.get("policy_reason") or []) \
+                if isinstance(cur.get("policy_reason"), list) else set()
+            b = set(p.get("policy_reason") or []) \
+                if isinstance(p.get("policy_reason"), list) else set()
+            if b - a:
+                cur = dict(cur)
+                cur["policy_reason"] = sorted(a | b)
+                fp_idx[fp] = cur
+
+    def lookup(s):
+        p = idx.get((s.get("key"), str(s.get("api", "")).strip()))
+        if p:
+            return p
+        fp = cat_policy.api_fingerprint(s.get("api"))
+        return fp_idx.get(fp) if fp else None
+
+    kept, dropped_site, dropped_cat = [], [], []
+    for s in sites:
+        p = lookup(s)
+
+        if p and p["verdict"] == "adult":
+            dropped_site.append((s, p.get("reason", "")))
+            continue
+
+        # 需要删的分类 = 探测判定的 + 配置里硬写的色情分类
+        need = set()
+        if p and p["verdict"] == "partial":
+            need |= set(p.get("policy_reason") or [])
+        cs = s.get("categories")
+        if isinstance(cs, list):
+            need |= {c for c in cs if cat_policy.hit(c, cat_policy.CAT_ADULT_EXACT)}
+        # 同时也查 ext 里的分类键（部分 dpy 站把分类写在 ext.分类）
+        if not need:
+            kept.append(s)
+            continue
+
+        if not isinstance(cs, list) or not cs:
+            allcats = (p.get("cats") if p else None) or []
+            # 白名单必须过滤掉所有色情分类名，不能只删探测点名的那几个。
+            # 实测教训：索尼源配置里没有 categories，白名单由探测分类生成，
+            # 而探测这一轮只判了「日本伦理」有片（其余判成空壳），
+            # 结果 港台三级/韩国伦理/西方伦理/两性课堂 顺着白名单漏了过去。
+            safe_list = [c for c in allcats
+                         if c not in need
+                         and not cat_policy.hit(c, cat_policy.CAT_ADULT_EXACT)]
+            if not allcats:
+                # 探测没拿到分类，配置里也没有 → 无从手术，整站删
+                dropped_site.append(
+                    (s, f"含色情分类[{','.join(sorted(need)[:3])}]且无分类信息"))
+                continue
+            if len(safe_list) < 3:
+                dropped_site.append(
+                    (s, f"分类违规且剩余分类仅 {len(safe_list)} 个"))
+                continue
+            s2 = dict(s)
+            s2["categories"] = safe_list
+            dropped_cat.append((s, sorted(need), safe_list))
+            kept.append(s2)
+            continue
+
+        new_cs = [c for c in cs if c not in need]
+        removed = [c for c in cs if c in need]
+        if not removed:
+            kept.append(s)
+            continue
+        if len(new_cs) < 3:
+            dropped_site.append((s, f"剔除后分类仅剩 {len(new_cs)} 个"))
+            continue
+        s2 = dict(s)
+        s2["categories"] = new_cs
+        dropped_cat.append((s, removed, new_cs))
+        kept.append(s2)
+
+    data["sites"] = kept
+    return dropped_site, dropped_cat
 
 
 def main():

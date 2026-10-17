@@ -5,7 +5,18 @@ pipeline.log
 tvbox_clean.json
 failed_output.json
 
+# 探测产物：每次运行内容都不同，绝不能提交
+# （提交了会导致 Actions 每天都产出一次"数据变化"的空 commit）
+probe_result.json
+adult_probable.json
+
 # 本地专用（token 绝不入库）
 .github_token
 tvbox_raw.json
 report.txt
+_live.json
+_fh*.json
+_fh*.txt
+_doc_body.md
+_tbl*.json
+_p.json

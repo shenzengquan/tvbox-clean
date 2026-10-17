@@ -27,8 +27,12 @@ th{font-weight:500;color:#5f5e5a;font-size:13px}
   <div style="margin-top:16px;font-size:13px;color:#5f5e5a">
     备用线路（GitHub CDN，速度相近，长期稳定）：
   </div>
-  <code id="u3">https://cdn.jsdelivr.net/gh/shenzengquan/tvbox-clean@main/tvbox.json</code>
+  <code id="u3">https://cdn.jsdelivr.net/gh/shenzengquan/tvbox-clean/tvbox.json</code>
   <button onclick="navigator.clipboard.writeText(document.getElementById('u3').textContent);this.textContent='已复制'">复制</button>
+  <div style="margin-top:8px;font-size:12px;color:#8a8880">
+    注意：备用线路地址里不要加 <code style="display:inline;padding:1px 4px;margin:0">@main</code>，
+    加了会被 CDN 缓存最长 12 小时，可能读到旧数据。
+  </div>
 </div>
 <table>
 <tr><th>项目</th><th>数量</th></tr>
