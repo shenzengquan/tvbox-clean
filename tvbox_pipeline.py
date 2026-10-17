@@ -382,18 +382,21 @@ def push_via_git(cleaned):
             "41898282+github-actions[bot]@users.noreply.github.com")
         # 只 add 确定存在的文件：report.txt 等本地辅助文件不在仓库里，
         # 直接写进 pathspec 会让 git 报 "did not match any files" 而整体失败
-        targets = [f for f in ("tvbox.json", "tvbox.min.json", "index.html",
-                               ".pipeline_state.json")
-                   if os.path.exists(os.path.join(HERE, f))]
-        run("git", "add", "-A", *targets)
-        # 只看这些目标文件自己的暂存状态。
-        # 不能直接看 `git status --porcelain`：runner 里 __pycache__/、
-        # pipeline.log 等未跟踪文件会让它永远非空，误判成「有变化」。
-        staged = run("git", "diff", "--cached", "--name-only", *targets)
+        # 用什么触发提交：只看真正的数据文件。
+        # - index.html 在 Actions 里不会被重新生成（它只是部署包里的静态页），
+        #   拿它做变更判定会永远显示"有变化"
+        # - .pipeline_state.json 每次都写新的 last_run，必然变化，
+        #   拿它判定等于每天都在提交
+        # 结论：只拿 tvbox.json / tvbox.min.json 当判定依据，
+        # 状态文件只是「顺路一起提交」，不参与判定。
+        data_files = ["tvbox.json", "tvbox.min.json"]
+        existing = [f for f in data_files if os.path.exists(os.path.join(HERE, f))]
+        run("git", "add", "-A", *existing, ".pipeline_state.json")
+        staged = run("git", "diff", "--cached", "--name-only", *existing)
         if not staged:
-            log("GitHub: 内容未变化，跳过提交")
+            log("GitHub: 数据未变化，跳过提交")
             return gh_urls_for()
-        log(f"GitHub: 待提交 {staged.split()}")
+        log(f"GitHub: 数据有变化 {staged.split()}，提交中…")
         now = datetime.now(CST).strftime("%Y-%m-%d %H:%M")
         run("git", "commit", "-m", f"auto update: {now} [skip ci]")
         run("git", "push", "origin", "HEAD:main")
