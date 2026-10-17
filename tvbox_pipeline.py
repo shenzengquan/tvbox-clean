@@ -375,9 +375,14 @@ def push_via_git(cleaned):
                                ".pipeline_state.json")
                    if os.path.exists(os.path.join(HERE, f))]
         run("git", "add", "-A", *targets)
-        if not run("git", "status", "--porcelain"):
+        # 只看这些目标文件自己的暂存状态。
+        # 不能直接看 `git status --porcelain`：runner 里 __pycache__/、
+        # pipeline.log 等未跟踪文件会让它永远非空，误判成「有变化」。
+        staged = run("git", "diff", "--cached", "--name-only", *targets)
+        if not staged:
             log("GitHub: 内容未变化，跳过提交")
             return {"repo": "https://github.com/shenzengquan/tvbox-clean"}
+        log(f"GitHub: 待提交 {staged.split()}")
         now = datetime.now(CST).strftime("%Y-%m-%d %H:%M")
         run("git", "commit", "-m", f"auto update: {now} [skip ci]")
         run("git", "push", "origin", "HEAD:main")

@@ -1,0 +1,11 @@
+# Actions runner 每次运行会产生的临时文件
+__pycache__/
+*.pyc
+pipeline.log
+tvbox_clean.json
+failed_output.json
+
+# 本地专用（token 绝不入库）
+.github_token
+tvbox_raw.json
+report.txt
