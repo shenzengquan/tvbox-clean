@@ -1,0 +1,48 @@
+name: TVBox 接口自动净化
+
+# 每天北京时间 08:30 自动运行（UTC 00:30）
+# 完全不依赖本机，GitHub 云端执行
+on:
+  schedule:
+    - cron: "30 0 * * *"
+  workflow_dispatch:          # 支持手动触发，方便测试
+
+permissions:
+  contents: write             # 提交结果到仓库所需
+
+concurrency:
+  group: tvbox-clean
+  cancel-in-progress: false   # 不要并发跑，避免互相覆盖
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 退出码：0=成功 / 2=校验失败(不发布，线上保留旧版) / 3=写文件失败
+      - name: 运行净化流水线
+        run: python tvbox_pipeline.py
+
+      - name: 校验产物
+        run: python scripts/check_output.py
+
+      - name: 刷新 jsDelivr 缓存
+        run: bash scripts/purge_cdn.sh
+        continue-on-error: true   # CDN 刷新失败不影响结果，会自动过期
+
+      - name: 输出摘要
+        if: always()
+        run: python scripts/summary.py
+        env:
+          REPO: ${{ github.repository }}
