@@ -353,9 +353,16 @@ def push_via_git(cleaned):
     import subprocess
 
     def run(*cmd, check=True):
-        r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
+        """执行 git 命令。
+
+        注意：cmd 的每个元素都是独立的 argv，绝不能把 "git commit -m 带空格的
+        消息" 拼成一个字符串传进来 —— subprocess 不会帮你二次切分，
+        结果就是 -m 只吃到了第一个词，commit 静默失败。
+        """
+        r = subprocess.run(list(cmd), cwd=HERE, capture_output=True, text=True)
         if check and r.returncode != 0:
-            raise RuntimeError(f"{' '.join(cmd)} 失败: {r.stderr[:300]}")
+            raise RuntimeError(
+                f"{' '.join(cmd)} 失败: {(r.stderr or r.stdout)[:300]}")
         return r.stdout.strip()
 
     try:
